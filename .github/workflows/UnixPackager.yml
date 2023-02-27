@@ -1,0 +1,66 @@
+name: Unix_Packager
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Build OS'
+        required: true
+        default: macOS
+        type: choice
+        options:
+          - macOS
+          - Linux
+      what:
+        description: 'Build target: all or name'
+        required: true
+        default: pdp10
+        type: string
+env:
+  OS:      ${{ inputs.os || 'macOS' }}
+  WHAT:    ${{ inputs.what || 'pdp10' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-kits:
+#    environment: open-simh-ci
+    runs-on: ${{ (  inputs.os || 'macOS' ) == 'macOS' && 'macos-12' || 'ubuntu-20.04' }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Install dependencies
+      shell: bash
+      run: sh -ex .travis/deps.sh ${{ env.OS == 'Linux' && 'linux' || 'osx' }}
+    - name: Build
+      shell: bash
+      run: |
+        make LTO=1 OPTMIZE=-O3 ${{ env.WHAT }}
+    - name: Test
+      shell: bash
+      run: |
+        BIN/${{ env.WHAT == 'all' && 'pdp10' || env.WHAT }} <<EOF
+        quit
+        EOF
+    - name: Make macOS package
+      shell: bash
+      if: env.OS == 'macOS'
+      run: |
+        echo "I'm making a macOS distribution"
+        echo "Sometimes it takes two commmand lines"
+        make -f macOS_kits.make
+    - name: Make Linux packages
+      shell: bash
+      if: env.OS != 'macOS'
+      run: |
+        echo "I'm making a RPM file"
+        make -f Linux_rpms.make
+        echo "And converting it to a DEB for fun"
+        make -f Linux_rpm2deb.make
+    - name: Results
+      shell: bash
+      if: always()
+      run: |
+        find BIN -ls
+        ls -lh *.rpm *.deb *.dmg || true
