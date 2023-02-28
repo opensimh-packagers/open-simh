@@ -1,0 +1,1213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <!-- References: https://helgeklein.com/blog/real-world-example-wix-msi-application-installer/
+                   https://www.firegiant.com/wix/tutorial/user-interface/
+                   http://www.geektieguy.com/2010/03/13/create-a-multi-lingual-multi-language-msi-using-wix-and-custom-build-scripts/
+  -->
+
+  <Product Id="*"
+           Name="Open SIMH"
+           Language="1033"
+           Version="4.1.0.0"
+           Manufacturer="Open SIMH.org"
+           UpgradeCode="b448e8ff-2637-470f-87e9-ba383aab5f60">
+    <Package InstallerVersion="200"
+             Description="The Open SIMH simulator system"
+             Comments="https://opensimh.org for information"
+             Compressed="yes"
+             InstallScope="perMachine" />
+
+    <MajorUpgrade AllowDowngrades="yes" />
+
+    <CustomAction Id='SaveCmdLineValueINSTALLDIR'
+                  Property='CMDLINE_INSTALLDIR'
+                  Value='[INSTALLDIR]'
+                  Execute='firstSequence' />
+    <CustomAction Id='SetFromCmdLineValueINSTALLDIR'
+                  Property='INSTALLDIR'
+                  Value='[CMDLINE_INSTALLDIR]'
+                  Execute='firstSequence' />
+
+    <InstallUISequence>
+      <Custom Action='SaveCmdLineValueINSTALLDIR'
+              Before='AppSearch' />
+      <Custom Action='SetFromCmdLineValueINSTALLDIR'
+              After='AppSearch'>
+        CMDLINE_INSTALLDIR
+      </Custom>
+    </InstallUISequence>
+
+    <InstallExecuteSequence>
+      <Custom Action='SaveCmdLineValueINSTALLDIR'
+              Before='AppSearch' />
+      <Custom Action='SetFromCmdLineValueINSTALLDIR'
+              After='AppSearch'>
+        CMDLINE_INSTALLDIR
+      </Custom>
+    </InstallExecuteSequence>
+
+    <?define SimBinaries = "$(var.ProjectDir)..\BIN\NT\Win32-$(var.Configuration)\"?>
+
+    <!-- Determine the directory of a previous installation (if one exists). If not INSTALLDIR stays empty -->
+    <Property Id="INSTALLDIR">
+      <RegistrySearch Id="DetermineInstallLocation"
+                      Type="raw"
+                      Root="HKLM"
+                      Key="Software\Open-SIMH\InstalledProducts\Simulators"
+                      Name="InstallLocation" />
+    </Property>
+
+    <MediaTemplate EmbedCab="yes"/>
+
+    <Directory Id="TARGETDIR"
+               Name="SourceDir">
+      <!-- Kit built here (virtually) -->
+      <Directory Id="ProgramFilesFolder">
+
+        <Directory Id="ProgramFilesSIMH"
+                   Name="Open-SIMH">
+          <Directory Id="INSTALLDIR"
+                     Name="Simulators">
+            <!-- Installation directory as a component so it can be emptied during uninstall
+                 (by default files added by someone other than Windows Installer are not removed) -->
+            <Component Id="INSTALLDIR_comp"
+                       Guid="80836BE8-8AAE-46A0-8B68-19580C855BE4">
+              <CreateFolder />
+              <RemoveFile Id="RemoveFilesFromAppDirectory"
+                          Name="*.*"
+                          On="uninstall" />
+            </Component>
+          </Directory>
+          <!-- INSTALLDIR -->
+        </Directory>
+        <!-- Open-SIMH -->
+      </Directory>
+      <!-- ProgramFiles -->
+
+      <Component Id="RegValInstallLocation_comp"
+                 Guid="4B92475F-9055-4D70-A0D0-08467DCB9C19">
+        <RegistryKey Root="HKLM"
+                     Key="Software\Open-SIMH\InstalledProducts\Open-SIMH">
+          <RegistryValue Name="InstallLocation"
+                         Value="[INSTALLDIR]"
+                         Type="string"
+                         KeyPath="yes" />
+        </RegistryKey>
+      </Component>
+
+      <Directory Id="ProgramMenuFolder"
+                 Name="Programs">
+        <Directory Id="StartMenuDir"
+                   Name="Open SIMH" >
+          <Component Id="StartMenuDir_comp"
+                     Guid="3F6056F5-D7FB-464B-B62B-EF8AEC465FB4">
+            <CreateFolder />
+            <RemoveFile Id="RemoveFilesFromStartMenuDir"
+                        Name="*.*"
+                        On="uninstall" />
+            <RegistryValue Root="HKCU"
+                           Key="Software\Open-SIMH\Simulators"
+                           Name="installedSMSir"
+                           Type="integer"
+                           Value="1"
+                           KeyPath="yes" />
+          </Component>
+          <!-- StartMenuDir_comp-->
+
+          <Component Id="StartMenuShortcut_comp"
+                     Guid="*">
+            <Shortcut Id="StartMenuShortcut"
+                      Name="Open SIMH"
+                      Description="Open SIMH Simulators"
+                      Target="[INSTALLDIR]"
+                      WorkingDirectory="INSTALLDIR" >
+              <Icon Id="StartMenuAppShortcutIcon"
+                    SourceFile="$(var.ProjectDir)DesktopIcon.ico"/>
+            </Shortcut>
+            <!-- StartMenuShortcut -->
+
+            <RemoveFolder Id="StartMenuDir"
+                          On="uninstall" />
+            <RegistryValue Root="HKCU"
+                           Key="Software\Open-SIMH\Simulators"
+                           Name="installedSMS"
+                           Type="integer"
+                           Value="1"
+                           KeyPath="yes" />
+          </Component>
+          <!-- StartMenuShortcut_comp -->
+
+        </Directory>
+        <!-- StartMenuDir -->
+
+      </Directory>
+      <!-- ProgramMenuFolder -->
+
+      <Directory Id="DesktopFolder"
+                 Name="Desktop">
+        <Component Id="DesktopShortcut_comp"
+                   Guid="*">
+          <Shortcut Id="DesktopShortcut"
+                    Name="Open SIMH"
+                    Description="Open SIMH Simulators"
+                    Target="[INSTALLDIR]"
+                    WorkingDirectory="INSTALLDIR" >
+            <Icon Id="DesktopIcon"
+                  SourceFile="$(var.ProjectDir)DesktopIcon.ico"/>
+          </Shortcut>
+          <RemoveFolder Id="DesktopFolder"
+                        On="uninstall"/>
+          <RegistryValue
+            Root="HKCU"
+            Key="Software\Open-SIMH\Simulators"
+            Name="installedDI"
+            Type="integer"
+            Value="1"
+            KeyPath="yes"/>
+        </Component>
+        <!-- DesktopShortcut_comp -->
+
+      </Directory>
+      <!-- DesktopFolder -->
+
+    </Directory>
+    <!-- TARGETDIR -->
+
+    <ComponentGroup    Id="StartMenuEntry" >
+      <ComponentRef      Id="StartMenuDir_comp"/>
+      <ComponentRef      Id="StartMenuShortcut_comp"/>
+    </ComponentGroup>
+
+    <ComponentGroup Id="InstallDoc_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="LICENSE.txt_comp"
+                 Guid="2104996C-E712-4F6D-AAF7-A72F9BCB6E00">
+        <File Source="$(var.ProjectDir)..\LICENSE.txt"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="README.txt_comp"
+                 Guid="71AA7304-1F70-4F93-923E-A7785F1A29B7">
+        <File Source="$(var.ProjectDir)README.txt"
+              KeyPath="no" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="_3B2_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="_3B2_400_comp"
+                 Guid="2B8C67AC-2D17-4A8C-A791-71A0A053C5E9"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)3B2-400.exe"
+              Id="_3B2_400Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="_3B2_700_comp"
+                 Guid="D7020D85-DD9A-44F6-906D-7BDD33C7D1C7"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)3B2-700.exe"
+              Id="_3B2_700Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="ALTAIR_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="ALTAIR_8080_comp"
+                 Guid="2AF471D2-570C-44F9-9454-A08F4EDCDF59"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)ALTAIR.exe"
+              Id="ALTAIRExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="Altair_Z80_comp"
+                 Guid="5E5381E5-34E8-4BEF-8CCE-59CE97B25D73"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)AltairZ80.exe"
+              Id="AltairZ80Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Burroughs_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="B5500_comp"
+                 Guid="F13735F9-FFB7-450F-8756-DAF29AA78F4F"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)B5500.exe"
+              Id="B5500Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Russian_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="BESM6_comp"
+                 Guid="2C4B2051-DE3D-4DF6-A18C-7530F5DB7C50"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)BESM6.exe"
+              Id="BESM6Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="CDC_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="CDC1700_comp"
+                 Guid="A7976621-3502-46E8-9EF3-4647F699C2E4"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)CDC1700.exe"
+              Id="CDC1700Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DataGeneral_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="DG_eclipse_comp"
+                 Guid="84A903B3-E4DB-4ED6-9326-573CB8B07290"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)ECLIPSE.exe"
+              Id="ECLIPSEExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DG_nova_comp"
+                 Guid="0BD8443B-645E-4F6C-95B6-DF6BB6B938B2"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)NOVA.exe"
+              Id="NOVAExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DEC_12bit_Family_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="DEC_PDP8_comp"
+                 Guid="D982B43E-3F22-47ED-A863-5181578E818D"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP8.exe"
+              Id="PDP8Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DEC_16bit_Family_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="DEC_PDP11_comp"
+                 Guid="965D8965-0167-4FE5-81D0-6558D0CF6058"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP11.exe"
+              Id="PDP11Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+    <ComponentGroup Id="DEC_18bit_Family_comp"
+                    Directory="INSTALLDIR">
+      <Component Id="DEC_PDP1_comp"
+                 Guid="74928EA1-A64F-48CA-B461-3865AC04C9B4"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP1.exe"
+              Id="PDP1Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_PDP4_comp"
+                 Guid="F2E4ACF4-9780-4A76-9EDB-1BE23BFA4871"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP4.exe"
+              Id="PDP4Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_PDP7_comp"
+                 Guid="8C41955A-8832-476B-970A-31D8332EF70D"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP7.exe"
+              Id="PDP7Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_PDP9_comp"
+                 Guid="6EA6DF0E-5720-4B76-B391-C1C9C03C2B1A"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP9.exe"
+              Id="PDP9Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_PDP15_comp"
+                 Guid="3D7F8B2E-0DFF-4FF8-8DE4-350905F6FE24"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP15.exe"
+              Id="PDP15Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_UC15_comp"
+                 Guid="A8715B5B-2DF7-4598-BE85-DB2E4C967A7A"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)UC15.exe"
+              Id="UC15Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_TX_0_comp"
+                 Guid="C89B798E-18EB-452E-81F4-F35188EB30E7"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)TX-0.exe"
+              Id="TX_0Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DEC_36bit_Family_comp"
+                    Directory="INSTALLDIR">
+      <Component Id="DEC_PDP6_comp"
+                 Guid="19BF7046-C517-429D-9947-4C896D5FE3FA"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP6.exe"
+              Id="PDP6Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_KA10_comp"
+                 Guid="8ED4DEFE-702D-42B7-A48C-29D995536C46"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP10-KA.exe"
+              Id="PDP10_KAExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_KI10_comp"
+                 Guid="B7889F9A-59F3-4707-B431-4819AC0735C1"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP10-KI.exe"
+              Id="PDP10_KIExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_KL10_comp"
+                 Guid="9BCB0B58-FED2-4CBC-9809-6E52A7CEBA62"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP10-KL.exe"
+              Id="PDP10_KLExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_KS10_comp"
+                 Guid="44BC67C7-3780-4640-BF43-A1AAA35EA962"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP10-KS.exe"
+              Id="PDP10_KSExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_PDP10_comp"
+                 Guid="524A2DD5-27BD-49D3-9F3A-DCC28AC739F9"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDP10.exe"
+              Id="PDP10Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DEC_Network_Family_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="DEC_Info100_comp"
+                 Guid="E3E7610D-F2ED-425F-A78B-A894A4F43E3E"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)InfoServer100.exe"
+              Id="InfoServer100Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_Info150_comp"
+                 Guid="8FBF61FD-2DE5-4FEE-A356-064A47D55A29"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)InfoServer150VXT.exe"
+              Id="InfoServer150VXTExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_Info1000_comp"
+                 Guid="0E6D8C84-8C5B-4B6E-A3D2-9FD82D5C6199"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)InfoServer1000.exe"
+              Id="InfoServer1000Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DEC_64bit_Family_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="DEC_alpha_comp"
+                 Guid="37B44347-966E-4720-AE83-837A717B9F7F"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)alpha.exe"
+              Id="alphaExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DEC_VLSI_VAX_Family_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="DEC_uVAX1_comp"
+                 Guid="C8B7BF55-B2EB-447A-A5C4-0491F5682A60"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)MicroVAX1.exe"
+              Id="MicroVAX1Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_uVAX2_comp"
+                 Guid="E6683D50-41DB-497A-B16D-D0E0A9072C7B"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)MicroVAX2.exe"
+              Id="MicroVAX2Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_uVAX2000_comp"
+                 Guid="84FF63B9-20A1-49E4-BF2F-3173DBC10DA4"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)MicroVAX2000.exe"
+              Id="MicroVAX2000Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_uVAX3100_comp"
+                 Guid="0DBBE34B-42D0-4528-A884-3533416C44DD"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)MicroVAX3100.exe"
+              Id="MicroVAX3100Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_uVAX3100M80_comp"
+                 Guid="8592038F-E3A3-4856-B1A9-937793D3CFB5"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)MicroVAX3100M80.exe"
+              Id="MicroVAX3100M80Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_uVAX3100e_comp"
+                 Guid="9710F7C9-EFA0-491A-B673-41EC799880EE"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)MicroVAX3100e.exe"
+              Id="MicroVAX3100eExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_uVAX3900_comp"
+                 Guid="0BC6D247-C83C-478D-A132-4BBE28DBA491"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)MicroVAX3900.exe"
+              Id="MicroVAX3900Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_rtVAX1000_comp"
+                 Guid="2BDE79B6-222A-4474-8120-976B03BEAF3A"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)rtVAX1000.exe"
+              Id="rtVAX1000Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAXx_comp"
+                 Guid="502B3C5F-A937-4E5B-923E-B5777B5DB9E5"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAX.exe"
+              Id="VAXExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAXStation3100M30_comp"
+                 Guid="A3AA8760-D162-42F9-AF8D-1B5192F40025"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAXstation3100M30.exe"
+              Id="VAXstation3100M30Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAXStation3100M38_comp"
+                 Guid="6428D2DA-F3C7-4238-848A-B90C886FF8A7"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAXstation3100M38.exe"
+              Id="VAXstation3100M38Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAXStation3100M76_comp"
+                 Guid="90C046B4-F033-4772-8C79-3AC8CE2C01FC"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAXstation3100M76.exe"
+              Id="VAXstation3100M76Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAXStation4000M60_comp"
+                 Guid="428F0E0D-8402-4F7A-B006-73E86B885070"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAXstation4000M60.exe"
+              Id="VAXstation4000M60Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAXStation4000VLC_comp"
+                 Guid="0A4B4C16-A938-4C52-A23D-77CCA2353D29"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAXstation4000VLC.exe"
+              Id="VAXstation4000VLCExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="DEC_LargeVAX_Family_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="DEC_VAX730_comp"
+                 Guid="189F8AFC-90DC-4BFC-9957-DE4E01F99666"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAX730.exe"
+              Id="VAX730Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAX750_comp"
+                 Guid="2B776D56-CD6D-42B0-B3E0-F0B87DD9CF25"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAX750.exe"
+              Id="VAX750Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAX780_comp"
+                 Guid="33DA8618-3658-4AA2-B554-207F9EB6935E"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAX780.exe"
+              Id="VAX780Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAX8200_comp"
+                 Guid="95B74051-A26B-435B-B645-9B3632B36C25"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAX8200.exe"
+              Id="VAX8200Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="DEC_VAX8600_comp"
+                 Guid="B10FA150-3114-429F-8819-1C60D08D06CD"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)VAX8600.exe"
+              Id="VAX8600Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="GRI_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="GRI_comp"
+                 Guid="B5678D2B-861D-4C54-9426-00A455766148"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)GRI.exe"
+              Id="GRIExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Honeywell_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="Honeywell_x16_comp"
+                 Guid="71BC4109-23A9-4B82-8936-7C73C3E620A2"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)H316.exe"
+              Id="H316Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="HP_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="HP_2100_comp"
+                 Guid="F9871593-94FA-4724-BEE2-C106EE735C0C"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)HP2100.exe"
+              Id="HP2100Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="HP_3000_comp"
+                 Guid="3AC7CDDE-72AD-4266-B4A9-9A56F4E271C2"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)HP3000.exe"
+              Id="HP3000Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="IBM_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="IBM_1401_comp"
+                 Guid="54E22D20-75FF-46B8-A894-ED45E9DE8258"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I1401.exe"
+              Id="I1401Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_1620_comp"
+                 Guid="190A46D9-516A-4E05-A2CC-1B744B951DD9"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I1620.exe"
+              Id="I1620Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_650_comp"
+                 Guid="EDC78357-0976-4E56-87D6-F90BB1C1F36E"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I650.exe"
+              Id="I650Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_701_comp"
+                 Guid="3B35EE13-70A6-427A-8F57-4A5008E7E5E0"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I701.exe"
+              Id="I701Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_704_comp"
+                 Guid="187E8E49-8260-4FB3-B450-35D35EE15FFB"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I704.exe"
+              Id="I704Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_7070_comp"
+                 Guid="78D0F335-3324-441D-BFE3-6BBD18B56023"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I7070.exe"
+              Id="I7070Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_7080_comp"
+                 Guid="36ACE02F-897E-42A8-AE05-270EEF887EBC"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I7080.exe"
+              Id="I7080Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_7090_comp"
+                 Guid="0545D35A-32BF-4FEE-9E74-93CF85C9B392"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I7090.exe"
+              Id="I7090Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_7094_comp"
+                 Guid="DEBBDCC8-F7E7-43FE-B242-ACA4A05620A2"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)I7094.exe"
+              Id="I7094Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="IBM_1130_comp"
+                 Guid="912159D1-7F63-405D-A7EB-86160B9A196F"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)IBM1130.exe"
+              Id="IBM1130Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="S3_comp"
+                 Guid="78AB78C5-C6C0-4868-BC66-6F21A8D4FB06"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)S3.exe"
+              Id="S3Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Intel_Systems_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="Intel_MDS_comp"
+                 Guid="6B58E992-04DD-4C6A-B9FA-855FCD21B608"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)Intel-MDS.exe"
+              Id="Intel_MDSExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="Intel_scelbi_comp"
+                 Guid="1A99315A-6F5D-4DCD-A266-2E3EB55731E3"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)scelbi.exe"
+              Id="scelbiExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Interdata_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="Interdata_16_comp"
+                 Guid="EA2CD103-6E1D-43BA-B4D7-CAFBE1131995"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)ID16.exe"
+              Id="ID16Exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="Interdata_32_comp"
+                 Guid="{5C4570CE-8F4D-48A9-8544-4B5ABD4A032C}"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)ID32.exe"
+              Id="ID32Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="RoyalMcbee_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="LGP_comp"
+                 Guid="54735F41-4E1A-4CF1-8E3F-938042164F28"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)lgp.exe"
+              Id="lgpExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="AdvancedComputer_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="PDQ_3_comp"
+                 Guid="56356C39-9F4D-426A-8ED8-6E0EB0905ECB"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)PDQ3.exe"
+              Id="PDQ3Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="SAGE_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="SAGE_68000_comp"
+                 Guid="E67171A1-7AC6-4B63-AE40-4BDAE60E78D2"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)sage.exe"
+              Id="sageExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="SDS_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="SDS940_comp"
+                 Guid="B12CE0AE-9088-4085-A3BD-AD0CCA01E190"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)SDS.exe"
+              Id="SDSExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="SEL_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="SEL32_comp"
+                 Guid="1A25C937-A184-469B-B81C-7F130D73941A"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)SEL32.exe"
+              Id="SEL32Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Man_SSEM_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="SSEM_comp"
+                 Guid="8EB090A1-0C0E-42CA-ABF3-A5344459F152"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)SSEM.exe"
+              Id="SSEMExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="imlac_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="imlacPDS_1_comp"
+                 Guid="29F9C956-33D9-41EB-AC21-90BD465462D5"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)imlac.exe"
+              Id="imlacExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="sigma_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="sigma32_comp"
+                 Guid="6CF5F4E3-94D5-4C6B-AEDA-38FDD6337E39"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)sigma.exe"
+              Id="sigmaExe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="swtp_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="swtp6800mpa_comp"
+                 Guid="74042153-4949-4DEB-929F-06D0790C7923"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)swtp6800mp-a.exe"
+              Id="swtp6800mp_aExe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="swtp6800mpa2_comp"
+                 Guid="04A59C07-AA55-4DE1-8250-39244BC509C3"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)swtp6800mp-a2.exe"
+              Id="swtp6800mp_a2Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="GeneralTurtle_comp"
+                    Directory="INSTALLDIR" >
+      <Component Id="tt2500_comp"
+                 Guid="5A24C4CD-ECA6-43B1-A7B3-B0DA0C66F36F"
+                 Win64="no" >
+        <File Source="$(var.SimBinaries)tt2500.exe"
+              Id="tt2500Exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Features -->
+
+    <Feature Id="Complete"
+             Title="Complete package"
+             Description="The Complete Open SIMH Simulator package"
+             Display="expand"
+             Level="1"
+             ConfigurableDirectory="INSTALLDIR"
+             AllowAdvertise="no"
+             InstallDefault="local"
+             Absent="allow" >
+      <Component Id="CompleteDummyComponent"
+                 Location="local"
+                 Directory="TARGETDIR"
+                 Guid="72818192-B92C-451B-9099-B175F3A4AA13" />
+      <!-- Inhibit "run from network" -->
+      <ComponentRef Id="INSTALLDIR_comp" />
+      <ComponentRef Id="RegValInstallLocation_comp"/>
+
+      <ComponentGroupRef Id="InstallDoc_comp" />
+
+      <Feature Id="AddDesktopShortcut"
+               Title="Desktop shortcut"
+               Description="Adds a shorcut to Open SIMH to the desktop"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentRef      Id="DesktopShortcut_comp" />
+      </Feature>
+
+      <Feature Id="AddToStartMenu"
+               Title="Start menu entry"
+               Description="Adds Open SIMH to the Start menu"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="StartMenuEntry"/>
+      </Feature>
+
+      <Feature Id="PDQ_3"
+               Title="Advanced Computer"
+               Description="PDQ-3 simulator"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="AdvancedComputer_comp" />
+      </Feature>
+
+      <Feature Id="ATT"
+               Title="AT&amp;T"
+               Description="3B2-400, 3B2-700"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="_3B2_comp" />
+      </Feature>
+
+      <Feature Id="ALTAIR"
+               Title="Altair"
+               Description="Altair 8080, Z80"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="ALTAIR_comp" />
+      </Feature>
+
+      <Feature Id="Burroughs"
+               Title="Burroughs"
+               Description="B550"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="Burroughs_comp" />
+      </Feature>
+
+      <Feature Id="CDC"
+               Title="Control Data"
+               Description="1700"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="CDC_comp" />
+      </Feature>
+      <Feature Id="DataGeneral"
+               Title="Data General"
+               Description="Nova, Eclipse"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="DataGeneral_comp" />
+      </Feature>
+
+      <Feature Id="DEC"
+               Title="Digital Equipment Corporation"
+               Description="DEC systems and appliances"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+
+        <Feature Id="DEC_12bit_Family"
+                 Title="12-bit systems"
+                 Description="PDP8"
+                 AllowAdvertise="no"
+                 InstallDefault="local"
+                 Absent="allow"
+                 Level="1" >
+          <ComponentGroupRef Id="DEC_12bit_Family_comp" />
+        </Feature>
+        <Feature Id="DEC_PDP11_Family"
+                 Title="16-bit systems"
+                 Description="PDP11/03,04,05,20,23,23+,24,34,40,44,45,53,60,70,73,738,83,84,93,94"
+                 AllowAdvertise="no"
+                 InstallDefault="local"
+                 Absent="allow"
+                 Level="1" >
+          <ComponentGroupRef Id="DEC_16bit_Family_comp" />
+        </Feature>
+        <Feature Id="DEC_18bit_Family"
+                 Title="18-bit systems"
+                 Description="PDP1, 4, 7, 9, 15, TX-0(MIT-LL)"
+                 AllowAdvertise="no"
+                 InstallDefault="local"
+                 Absent="allow"
+                 Level="1" >
+          <ComponentGroupRef Id="DEC_18bit_Family_comp" />
+        </Feature>
+        <Feature Id="DEC_32bit_Family"
+                 Title="32-bit systems"
+                 Description="VAX"
+                 AllowAdvertise="no"
+                 InstallDefault="local"
+                 Absent="allow"
+                 Level="1" >
+          <Feature Id="DEC_LargeVAX_Family"
+                   Title="Large VAX systems"
+                   Description="VAX730,750,780,8200,8600"
+                   AllowAdvertise="no"
+                   InstallDefault="local"
+                   Absent="allow"
+                   Level="1" >
+            <ComponentGroupRef Id="DEC_LargeVAX_Family_comp" />
+          </Feature>
+          <Feature Id="DEC_VLSI_VAX_Family"
+                   Title="VLSI VAX systems"
+                   Description="MicroVAX1,2,2000,3100,4000,rtVAX, and VAXstations"
+                   AllowAdvertise="no"
+                   InstallDefault="local"
+                   Absent="allow"
+                   Level="1" >
+            <ComponentGroupRef Id="DEC_VLSI_VAX_Family_comp" />
+          </Feature>
+        </Feature>
+        <Feature Id="DEC_36bit_Family"
+                 Title="36-bit systems"
+                 Description="PDP6, KA10, KI10, KL10, KS10"
+                 AllowAdvertise="no"
+                 InstallDefault="local"
+                 Absent="allow"
+                 Level="1" >
+          <ComponentGroupRef Id="DEC_36bit_Family_comp" />
+        </Feature>
+        <Feature Id="DEC_64bit_Family"
+                 Title="64-bit systems"
+                 Description="Alpha"
+                 AllowAdvertise="no"
+                 InstallDefault="local"
+                 Absent="allow"
+                 Level="1" >
+          <ComponentGroupRef Id="DEC_64bit_Family_comp" />
+        </Feature>
+        <Feature Id="DEC_NetApp_Family"
+                 Title="network appliances"
+                 Description="Infoservers"
+                 AllowAdvertise="no"
+                 InstallDefault="local"
+                 Absent="allow"
+                 Level="1" >
+          <ComponentGroupRef Id="DEC_Network_Family_comp" />
+        </Feature>
+      </Feature>
+
+      <Feature Id="tt2500"
+               Title="General Turtle"
+               Description="TT2500 "
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="GeneralTurtle_comp" />
+      </Feature>
+
+      <Feature Id="GRI"
+               Title="GRI Computer"
+               Description="GRI-99, 909"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="GRI_comp" />
+      </Feature>
+
+      <Feature Id="HP"
+               Title="Hewlett-Packard"
+               Description="HP2100, HP3000"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="HP_comp" />
+      </Feature>
+
+      <Feature Id="Honeywell"
+               Title="Honeywell"
+               Description="H316, 516"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="Honeywell_comp" />
+      </Feature>
+
+      <Feature Id="imlac"
+               Title="IMLAC"
+               Description="PDS-1"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="imlac_comp" />
+      </Feature>
+
+      <Feature Id="Intel_Systems"
+               Title="Intel Microprocessor Data Systems"
+               Description="MD5, scelbi"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="Intel_Systems_comp" />
+      </Feature>
+
+      <Feature Id="Interdata"
+               Title="Interdata"
+               Description="16 and 32-bit"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="Interdata_comp" />
+      </Feature>
+
+      <Feature Id="IBM"
+               Title="IBM"
+               Description="1401, 1620, 650, 701, 704, 7070, 7080, 7090, 7094, System/3, and 1130"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="IBM_comp" />
+      </Feature>
+
+      <Feature Id="LGP"
+               Title="Royal-Mcbee"
+               Description="LGP 21, 30"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="RoyalMcbee_comp" />
+      </Feature>
+
+      <Feature Id="SAGE"
+               Title="SAGE Inc."
+               Description="SAGE"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="SAGE_comp" />
+      </Feature>
+      <Feature Id="SDS"
+               Title="Scientific Data Systems"
+               Description="SDS 940"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="SDS_comp" />
+      </Feature>
+      <Feature Id="SEL32"
+               Title="System Engineering Lab"
+               Description="SEL32"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="SEL_comp" />
+      </Feature>
+
+      <Feature Id="Russian"
+               Title="Russian computers"
+               Description="BESM6"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="Russian_comp" />
+      </Feature>
+
+      <Feature Id="swtp6800"
+               Title="SouthWest Technical Products"
+               Description="swtp 6800mp-a and -a2"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="swtp_comp" />
+      </Feature>
+
+      <Feature Id="SSEM"
+               Title="University of Manchester"
+               Description="SSEM"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="Man_SSEM_comp" />
+      </Feature>
+
+      <Feature Id="sigma"
+               Title="XeroX Data Systems"
+               Description="Sigma"
+               AllowAdvertise="no"
+               InstallDefault="local"
+               Absent="allow"
+               Level="1" >
+        <ComponentGroupRef Id="sigma_comp" />
+      </Feature>
+
+    </Feature>
+
+    <UIRef Id="WixUI_FeatureTree"/>
+    <UIRef Id="WixUI_ErrorProgressText"/>
+    <WixVariable Id="WixUIDialogBmp"
+                 Value="DialogPage.bmp" />
+    <WixVariable Id="WixUIBannerBmp"
+                 Value="Banner.bmp" />
+    <WixVariable Id="WixUILicenseRtf"
+                 Value="$(var.ProjectDir)LICENSE.rtf" />
+  </Product>
+</Wix>

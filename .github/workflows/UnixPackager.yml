@@ -2,6 +2,18 @@ name: Unix_Packager
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: 'Ref/hash/tag - blank for head'
+        required: false
+        type: string
+      configuration:
+        description: 'Configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+        - Release
+        - Debug
       os:
         description: 'Build OS'
         required: true
@@ -10,57 +22,199 @@ on:
         options:
           - macOS
           - Linux
+      architecture:
+        description: 'Architecture'
+        required: true
+        default: x64
+        type: choice
+        options:
+        - x64
+#        - x86
+#        - arm64
+      dispose:
+        description: 'Disposition'
+        required: true
+        default: 'Discard'
+        type: choice
+        options:
+        - 'Discard'
+        - 'Snapshot'
+        - 'Release'
       what:
         description: 'Build target: all or name'
         required: true
-        default: pdp10
+        default: all
         type: string
+
+        #    min hr mday mon dow UTC
+  schedule:
+#   - cron:  '23  8  *    *   1,3,5'   # x64 snapshots
+#   - cron:  '13 16  *    *   2,4,6'   # x86 snapshots
+#   - cron:  '46 20  *    *   1,4,0'   # Arm snapshots (Windows)
+    - cron:  '32  9  *    *   0'       # macOS snapshots
+    - cron:  '34 10  *    *   0'       # Linux snapshots
+
+        # GITHUB_SHA last commit GITHUB_REF refs/tags/name
+  release:
+    types: published
+
 env:
-  OS:      ${{ inputs.os || 'macOS' }}
-  WHAT:    ${{ inputs.what || 'pdp10' }}
+  REF:                 ${{ inputs.ref            || github.sha     }}
+  BUILD_CONFIGURATION: ${{ inputs.configuration  || 'Release'      }}
+  WHAT:                ${{ inputs.what           || 'all'          }}
+  BUILD_ARCH:          ${{ inputs.architecture   || 'x64'          }}
+  DISPOSE:             ${{ inputs.dispose        || ( github.event_name == 'schedule' && 'Snapshot' ) || ( github.event_name == 'release' && 'Release' ) || 'Discard' }}
 
 permissions:
   contents: read
 
 jobs:
   build-kits:
-#    environment: open-simh-ci
-    runs-on: ${{ (  inputs.os || 'macOS' ) == 'macOS' && 'macos-12' || 'ubuntu-20.04' }}
+    environment: open-simh-ci
+    runs-on: ${{ (  inputs.os || ( github.event_name == 'schedule' && ( ( contains(github.event.schedule, ' 9 ') && 'macOS' ) || ( contains(github.event.schedule, ' 10 ') && 'Linux' ) ) ) || 'Linux' ) == 'macOS' && 'macos-12' || 'ubuntu-20.04' }}
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-    - name: Install dependencies
-      shell: bash
-      run: sh -ex .travis/deps.sh ${{ env.OS == 'Linux' && 'linux' || 'osx' }}
-    - name: Build
+    - name: 'Verify configuration'
+      if: env.BUILD_ARCH != 'x64'
       shell: bash
       run: |
+        echo "::error file=UnixPackager.yml,title=Invalid configuration::no runners for Architecture ${{ env.BUILD_ARCH }}"
+        exit 1
+    - name: 'Deal with CRLF files in repo'
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: git config --global core.autocrlf input
+    - name: 'Checkout branch'
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ env.REF }}
+    - name: Identify branch
+      shell: bash
+      run: |
+        br="${{ github.ref_name || github.head_ref }}"
+        if [ -z "$br" ]; then
+        "DISPOSE=Discard" >>$GITHUB_ENV
+        "BRANCH=null"     >>$GITHUB_ENV
+        else
+        br="$(tr -d '\f \n\r\t\v' <<<"$br")"
+        if [ -z "$br" ]; then
+        echo "DISPOSE=Discard" >>$GITHUB_ENV
+        echo "BRANCH=empty"    >>$GITHUB_ENV
+        elif [[ "$br" =~ ^[Ss]upnik ]]; then
+        echo "BRANCH=V3"       >>$GITHUB_ENV
+        else
+        echo "BRANCH=V4"       >>$GITHUB_ENV
+        fi; fi
+    - name: Install external libraries
+      shell: bash
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: sh -ex .travis/deps.sh ${{ runner.os == 'Linux' && 'linux' || 'osx' }}
+    - name: Build simulators (Release)
+      if: env.BUILD_CONFIGURATION == 'Release'
+      shell: bash
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
         make LTO=1 OPTMIZE=-O3 ${{ env.WHAT }}
+    - name: Build simulators (Debug)
+      if: env.BUILD_CONFIGURATION == 'Debug'
+      shell: bash
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        make DEBUG=1 ${{ env.WHAT }}
     - name: Test
       shell: bash
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         BIN/${{ env.WHAT == 'all' && 'pdp10' || env.WHAT }} <<EOF
         quit
         EOF
+    - name: Compute archive name
+      if: env.DISPOSE != 'Discard'
+      shell: bash
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        COMMIT="$(git log -1 --pretty="%H")"
+        CDATE="$(git log -1 --pretty="%aI")"
+        CDATE="${CDATE/T/-}"
+        CDATE="${CDATE//:/-}"
+        DIRNAME="${{runner.os}}-${{env.BUILD_ARCH}}-${{env.BUILD_CONFIGURATION}}"
+        echo "COMMIT=${COMMIT}"                      >>$GITHUB_ENV
+        echo "CDATE=${CDATE}"                        >>$GITHUB_ENV
+        echo "DIRNAME=${DIRNAME}"                    >>$GITHUB_ENV
+        echo "ARCNAME=${CDATE}-${COMMIT}-${DIRNAME}" >>$GITHUB_ENV
+    - name: Collect results for deployment
+      if: env.DISPOSE != 'Discard'
+      shell: bash
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        mkdir "${{env.DIRNAME}}"
+        cp -pr BIN "${{env.DIRNAME}}"
+        rm -rf "${{env.DIRNAME}}/NT" "${{env.DIRNAME}}/buildtools"
+        cp -p LICENSE.txt "${{env.DIRNAME}}"
+        echo "This software was created by the Open SIMH Project" >"${{env.DIRNAME}}/README.txt"
+        echo "For more information, see https://opensimh.org"    >>"${{env.DIRNAME}}/README.txt"
+        echo "Built in ${{ github.repository }} by ${{ github.actor }} (${{ github.event_name }}) from ${{ github.ref_type }}/${{ github.ref_name }}" >${{ env.ARCNAME }}-contents.txt
+        echo "In the archive, the files reside in ${{env.DIRNAME}}\*" >>${{ env.ARCNAME }}-contents.txt
+        echo "Dates/times are UTC"              >>${{ env.ARCNAME }}-contents.txt
+        echo ""                                 >>${{ env.ARCNAME }}-contents.txt
+        ls -lh "${{env.DIRNAME}}"               >>${{ env.ARCNAME }}-contents.txt
+        for T in .rpm .deb .dmg .tar; do cp -p ${{ env.ARCNAME }}-contents.txt ${{ env.ARCNAME }}$T-contents.txt ; done
+        rm -f ${{ env.ARCNAME }}-contents.txt
     - name: Make macOS package
       shell: bash
-      if: env.OS == 'macOS'
+      if: runner.os == 'macOS'
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
-        echo "I'm making a macOS distribution"
-        echo "Sometimes it takes two commmand lines"
-        make -f macOS_kits.make
+        make -f .travis/tar_kit.make    ARCNAME="${{env.ARCNAME}}" DIRNAME="${{env.DIRNAME}}" BRANCH="${{env.BRANCH}}" REFTYPE="${{ github.ref_type }}" REFNAME="${{ github.ref_name }}" OS="${{runner.os}}"
+        TARBALL="$(ls -1t *.tar *.tar.* *.tgz 2>/dev/null | head -n1)" || true
+        make -f .travis/macOS_kits.make ARCNAME="${{env.ARCNAME}}" DIRNAME="${{env.DIRNAME}}" BRANCH="${{env.BRANCH}}" REFTYPE="${{ github.ref_type }}" REFNAME="${{ github.ref_name }}" TARBALL="$TARBALL" TARDIR="${TARBALL/%.tar.*/.tar}-contents.txt"
     - name: Make Linux packages
       shell: bash
-      if: env.OS != 'macOS'
+      if: runner.os != 'macOS'
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
-        echo "I'm making a RPM file"
-        make -f Linux_rpms.make
-        echo "And converting it to a DEB for fun"
-        make -f Linux_rpm2deb.make
-    - name: Results
+        make -f .travis/tar_kit.make        ARCNAME="${{env.ARCNAME}}" DIRNAME="${{env.DIRNAME}}" BRANCH="${{env.BRANCH}}" REFTYPE="${{ github.ref_type }}" REFNAME="${{ github.ref_name }}" OS="${{runner.os}}"
+        TARBALL="$(ls -1t *.tar *.tar.* *.tgz 2>/dev/null | head -n1)" || true
+        make -f .travis/Linux_rpms.make     ARCNAME="${{env.ARCNAME}}" DIRNAME="${{env.DIRNAME}}" BRANCH="${{env.BRANCH}}" REFTYPE="${{ github.ref_type }}" REFNAME="${{ github.ref_name }}" TARBALL="$TARBALL" TARDIR="${TARBALL/%.tar.*/.tar}-contents.txt"
+        make -f .travis/Linux_rpm2deb.make  ARCNAME="${{env.ARCNAME}}" DIRNAME="${{env.DIRNAME}}" BRANCH="${{env.BRANCH}}" REFTYPE="${{ github.ref_type }}" REFNAME="${{ github.ref_name }}" TARBALL="$TARBALL" TARDIR="${TARBALL/%.tar.*/.tar}-contents.txt"
+    - name: Import signing key
+      if: env.DISPOSE != 'Discard'
+      uses: crazy-max/ghaction-import-gpg@v5
+      with:
+        gpg_private_key: ${{ secrets.GPG_KIT_SIGNING_KEY }}
+    - name: Sign packages
+      if: env.DISPOSE != 'Discard'
       shell: bash
-      if: always()
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
-        find BIN -ls
-        ls -lh *.rpm *.deb *.dmg || true
+        shopt -s nullglob
+        for F in *.rpm *.deb *.dmg *.tar *.tar.* ; do gpg --output "${F}.sig" --detach-sig "${F}" ; done
+    - name: Deploy to kits server
+      id: scp-pem
+      if: env.DISPOSE != 'Discard'
+      shell: bash
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        touch id_deploy; chmod 0600 id_deploy; echo '${{ secrets.SCP_DEPLOY_PEM }}' >id_deploy
+        echo "SDK=id_deploy" >>$GITHUB_OUTPUT
+        touch                               known_hosts
+        chmod 0600                          known_hosts
+        echo '${{ vars.KITS_HOST_UNIX }}'  >known_hosts
+        if [ "${{ env.DISPOSE }}" == 'Snapshot' ]; then TDIR="Snapshots"; else TDIR="Releases" ; fi
+        shopt -u nullglob
+        kits="$(find *.rpm *.deb *.dmg *.tar *.tar.* *.tgz -maxdepth 0 ! -name '*.sig'  2>/dev/null)" || true
+        if [ -z "$kits" ]; then echo "::error file=UnixPackager.yml,title=No kits produced::Build produced no kits, but no errors"; exit 1; fi
+        for F in $kits; do scp -p -q -r -B -o "UserKnownHostsFile=./known_hosts" -i id_deploy "$F" "${F}.sig" "${F/%.tar*/.tar}-contents.txt" simh-deploy@kits.opensimh.org:/var/www/kits/html/${{ env.BRANCH }}/${{runner.os}}/$TDIR/${{ env.BUILD_ARCH }}/ ; done
+    - name: cleanup pem
+      env:
+        FN: ${{ steps.scp-pem.outputs.SDK }}
+      shell: bash
+      if: always() && ( env.FN != '' )
+      run: |
+        rm -f "${{env.FN}}"
+
+#    - name: Results
+#      shell: bash
+#      if: always()
+#      run: |
+#        shopt -s nullglob
+#        ls -lh *.rpm *.deb *.dmg *.tar* *.sig *.bak || true

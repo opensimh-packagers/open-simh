@@ -61,6 +61,7 @@ on:
 
 env:
   SOLUTION_FILE:       'Visual Studio Projects\Simh.ci.sln'
+  MSI_PROJECT_DIR:     'WindowsInstaller'
   REF:                 ${{ inputs.ref            || github.sha     }}
   BUILD_CONFIGURATION: ${{ inputs.configuration  || 'Release'      }}
   BUILD_PLATFORM:      ${{ inputs.platform       || 'Win32'        }}
@@ -79,6 +80,7 @@ jobs:
     - name: 'Verify configuration'
       if: ( env.BUILD_PLATFORM == 'Win32' && env.BUILD_ARCH != 'x86' && env.BUILD_ARCH != 'x64' ) || ( env.BUILD_PLATFORM == 'ARM' && env.BUILD_ARCH != 'arm64' )
       shell: cmd
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         echo ::error file=windows_build.yml,title=Invalid configuration::Platform ${{ env.BUILD_PLATFORM }} does not support Architecture ${{ env.BUILD_ARCH }}
         exit 1
@@ -90,6 +92,7 @@ jobs:
         ref: ${{ env.REF }}
     - name: Identify branch
       shell: pwsh
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         $br="${{ github.ref_name || github.head_ref }}"
         if ( $null -eq $br ) {
@@ -108,6 +111,7 @@ jobs:
     - name: Get external libraries
       #(Required for V3, V4 will see and skip)
       shell: pwsh
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         Invoke-WebRequest -Uri "https://github.com/simh/windows-build/archive/windows-build.zip" -UseBasicParsing -OutFile windows-build.zip
         Expand-Archive -Path .\windows-build.zip -DestinationPath .\windows-build.tmp
@@ -121,6 +125,14 @@ jobs:
     - name: Install PuTTY
       run: |
         choco install --no-progress putty
+    - name: Create README.txt for MSI
+      if: env.DISPOSE != 'Discard' && env.BRANCH != 'V3'
+      shell: pwsh
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        echo "This software was created by the Open SIMH Project" >"${{env.MSI_PROJECT_DIR}}\README.txt"
+        echo "For more information, see https://opensimh.org"    >>"${{env.MSI_PROJECT_DIR}}\README.txt"
+        echo "Built in ${{ github.repository }} by ${{ github.actor }} (${{ github.event_name }}) from ${{ github.ref_type }}/${{ github.ref_name }}" >>${{ env.MSI_PROJECT_DIR }}\README.txt
     - name: Build Simulators with Visual Studio
       shell: cmd
       working-directory: ${{env.GITHUB_WORKSPACE}}
@@ -138,6 +150,7 @@ jobs:
       shell: pwsh
       run: |
         "ZIPNAME=${{env.CDATE}}-${{env.COMMIT}}-${{env.PACNAME}}.zip" >>$env:GITHUB_ENV
+        "MSINAME=${{env.CDATE}}-${{env.COMMIT}}-${{env.PACNAME}}.msi" >>$env:GITHUB_ENV
     - name: Collect results for deployment
       if: env.DISPOSE != 'Discard'
       shell: cmd
@@ -163,8 +176,15 @@ jobs:
       shell: pwsh
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
-        Compress-Archive -Path "${{ env.PACNAME }}" -DestinationPath "${{ env.ZIPNAME }}"     
+        Compress-Archive -Path "${{ env.PACNAME }}" -DestinationPath "${{ env.ZIPNAME }}"
         gpg --output "${{ env.ZIPNAME }}.sig" --detach-sig "${{ env.ZIPNAME }}"
+    - name: Rename, relocate and sign MSI
+      if: env.DISPOSE != 'Discard' && env.BRANCH != 'V3'
+      shell: cmd
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        move "BIN\NT\${{env.BUILD_PLATFORM}}-${{env.BUILD_CONFIGURATION}}\WindowsInstaller.msi" "BIN\NT\${{ env.MSINAME }}"
+        gpg --output "BIN\NT\${{ env.MSINAME }}.sig" --detach-sig "BIN\NT\${{ env.MSINAME }}"
     - name: Deploy new executables to kits server
       id: scp-ppk
       if: env.DISPOSE != 'Discard'
@@ -178,20 +198,22 @@ jobs:
         Set-Content $fn -Value $eb -AsByteStream;
         "SDK=$fn" >>$env:GITHUB_OUTPUT
         "KITS_HOST_KEY=" + "${{ vars.KITS_HOST_KEY }}".Trim() + "`n" >>$env:GITHUB_ENV
-    - name: Save as snapshot
-      if: ${{ env.DISPOSE == 'Snapshot' }}
-      shell: cmd
+    - name: Push to server
+      if: ${{ env.DISPOSE != 'Discard' }}
+      shell: pwsh
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
-        pscp -p -r -q -batch -noagent -i ${{ steps.scp-ppk.outputs.SDK }} -hostkey "${{ env.KITS_HOST_KEY }}" ${{ env.ZIPNAME }} ${{ env.ZIPNAME }}.sig ${{ env.ZIPNAME }}-contents.txt simh-deploy@kits.opensimh.org:/var/www/kits/html/${{ env.BRANCH }}/Windows/Snapshots/${{ env.BUILD_ARCH }}/
-    - name: Save as release
-      if: env.DISPOSE == 'Release'
-      shell: cmd
-      run: |
-        pscp -p -r -q -batch -noagent -i ${{ steps.scp-ppk.outputs.SDK }} -hostkey "${{ env.KITS_HOST_KEY }}" ${{ env.ZIPNAME }} ${{ env.ZIPNAME }}.sig ${{ env.ZIPNAME }}-contents.txt simh-deploy@kits.opensimh.org:/var/www/kits/html/${{ env.BRANCH }}/Windows/Releases/${{ env.BUILD_ARCH }}/
+        $files = "${{ env.ZIPNAME }} ${{ env.ZIPNAME }}.sig ${{ env.ZIPNAME }}-contents.txt"
+        if ( "${{ env.BRANCH }}" -ne 'V3' ) {
+          $files += " BIN\NT\${{ env.MSINAME }} BIN\NT\${{ env.MSINAME }}.sig"
+        }
+        $reltype = "${{ env.DISPOSE == 'Snapshot' && 'Snapshots' || 'Releases' }}"
+        pscp -p -r -q -batch -noagent -i ${{ steps.scp-ppk.outputs.SDK }} -hostkey "${{ env.KITS_HOST_KEY }}" $files.split(' ') "simh-deploy@kits.opensimh.org:/var/www/kits/html/${{ env.BRANCH }}/Windows/$reltype/${{ env.BUILD_ARCH }}/"
     - name: cleanup ppk
       env:
         FN: ${{ steps.scp-ppk.outputs.SDK }}
       shell: pwsh
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       if: always() && ( env.FN != '' )
       run: |
         Remove-Item -Path $env:FN;
