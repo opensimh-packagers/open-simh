@@ -45,4 +45,4 @@ all :
 	$(MV) $(ARCNAME).tar-contents.txt $(ARCNAME).tar-contents.txt.bak
 	while read -r line; do  [[ "$$line" =~ ^$$ ]] && break; [[ "$$line" =~ ^In\ the\ archive ]] || echo "$$line" >>$(ARCNAME).tar-contents.txt ; done <$(ARCNAME).tar-contents.txt.bak || true
 	$(TAR) -tvaf $(ARCNAME).tar$(CMP) >>$(ARCNAME).tar-contents.txt
-	$(RM) -rf $(ROOT) $(ARCNAME).tar-contents.txt.bak
+	$(SUDO) $(RM) -rf $(ROOT) $(ARCNAME).tar-contents.txt.bak
