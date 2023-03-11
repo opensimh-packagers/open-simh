@@ -956,7 +956,7 @@
 
       <Feature Id="PDQ_3"
                Title="Advanced Computer"
-               Description="PDQ-3 simulator"
+               Description="PDQ-3"
                AllowAdvertise="no"
                InstallDefault="local"
                Absent="allow"
