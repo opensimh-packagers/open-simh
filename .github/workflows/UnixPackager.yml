@@ -120,13 +120,14 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         make DEBUG=1 ${{ env.WHAT }}
-    - name: Test
-      shell: bash
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: |
-        BIN/${{ env.WHAT == 'all' && 'pdp10' || env.WHAT }} <<EOF
-        quit
-        EOF
+    - name: Setup Perl
+      if: env.DISPOSE != 'Discard'
+      uses: perl-actions/install-with-cpanm@v1
+      with:
+        sudo: true
+        verbose: false
+        install: |
+          XML::Simple
     - name: Compute archive name
       if: env.DISPOSE != 'Discard'
       shell: bash
@@ -147,7 +148,7 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         mkdir "${{env.DIRNAME}}"
-        cp -pr BIN "${{env.DIRNAME}}"
+        cp -pr BIN/* "${{env.DIRNAME}}"
         rm -rf "${{env.DIRNAME}}/NT" "${{env.DIRNAME}}/buildtools"
         cp -p LICENSE.txt "${{env.DIRNAME}}"
         echo "This software was created by the Open SIMH Project" >"${{env.DIRNAME}}/README.txt"

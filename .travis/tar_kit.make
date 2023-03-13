@@ -25,24 +25,43 @@ endif
 bindir := $(dest)/bin
 docdir := $(dest)/doc
 
+installdir       := $(patsubst $(ROOT)/%,/%,$(dest))
+windowsInstaller := WindowsInstaller
+productFile      := Product.wxs
+
 CHOWN := chown
 CP    := cp
 FIND  := find
 MKDIR := mkdir
 MV    := mv
+PERL  := perl
 RM    := rm
 SUDO  := sudo
 
-.PHONY : all
+.PHONY : all tmpdirs
 
-all :
+all : tmpdirs $(bindir)/simh_installer
 	echo "'$(SHELL)' $(BRANCH) $(REFTYPE) $(REFNAME)"
-	$(MKDIR) -p $(bindir) $(docdir)
-	$(FIND) $(DIRNAME) -type f ! -name '*.txt' -exec $(CP) -p {} $(bindir) \;
-	$(FIND) $(DIRNAME) -type f   -name '*.txt' -exec $(CP) -p {} $(docdir) \;
+	$(FIND) $(DIRNAME) -type f ! \( -name '*.txt' -o -name '*.doc' -o -name '*.pdf' \) -exec $(CP) -p {} $(bindir) \;
+	$(FIND) $(DIRNAME) -type f   \( -name '*.txt' -o -name '*.doc' -o -name '*.pdf' \) -exec $(CP) -p {} $(docdir) \;
 	$(SUDO) $(CHOWN) -R 0:0 $(ROOT)
 	cd tmp && $(TAR) -caf ../$(ARCNAME).tar$(CMP) $(patsubst $(ROOT)/%,%,$(docdir)) $(patsubst $(ROOT)/%,%,$(bindir))
 	$(MV) $(ARCNAME).tar-contents.txt $(ARCNAME).tar-contents.txt.bak
 	while read -r line; do  [[ "$$line" =~ ^$$ ]] && break; [[ "$$line" =~ ^In\ the\ archive ]] || echo "$$line" >>$(ARCNAME).tar-contents.txt ; done <$(ARCNAME).tar-contents.txt.bak || true
 	$(TAR) -tvaf $(ARCNAME).tar$(CMP) >>$(ARCNAME).tar-contents.txt
 	$(SUDO) $(RM) -rf $(ROOT) $(ARCNAME).tar-contents.txt.bak
+
+
+tmpdirs:
+	$(MKDIR) -p $(bindir) $(docdir)
+
+# Configure and build simh_installer for the target
+# The simulator groups are defined by the Windows installer XML definitions
+#
+# --source is where the unpacked tarball lives.  --dest is the installator root
+# Package installers may adjust
+$(bindir)/simh_installer : .travis/wxs2sh tmpdirs $(windowsInstaller)/$(productFile)
+	$(PERL) .travis/wxs2sh --windows-installer=$(windowsInstaller) --product=$(productFile) \
+	--build-directory=$(DIRNAME) \
+	--source-directory=$(patsubst $(ROOT)/%,%,$(bindir)) \
+	--destination-directory=$(installdir) $(bindir)/simh_installer

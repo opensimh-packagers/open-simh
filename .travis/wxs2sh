@@ -1,0 +1,601 @@
+#!/usr/bin/perl
+
+my $copyright =
+    "Copyright (c) 2023 Timothe Litt litt _at acm.org\nUse --man for license.";
+
+# The happiest programs are those that write programs.
+
+use warnings;
+use strict;
+
+my $VERSION = 'V1.0.0';
+
+use Fcntl( qw/:mode/ );
+use File::Basename;
+use File::Spec;
+use Getopt::Long( qw/:config bundling/ );
+use XML::Simple;
+
+my $SELF = basename $0;
+
+sub validstr;
+sub dofeature;
+
+my( $bash_loc, $windows_installer, $wxsfile, $source_dir, $dest_dir, $build_dir,
+    @excludes,
+    $help, $man, $version );
+
+GetOptions(
+        'bash-location=s'         => \$bash_loc,
+        'build-directory=s'       => \$build_dir,
+        'destination-directory=s' => \$dest_dir,
+        'exclude=s'               => \@excludes,
+        'product=s'               => \$wxsfile,
+        'source-directory=s'      => \$source_dir,
+        'windows-installer=s'     => \$windows_installer,
+        'help|h'                  => \$help,
+        'man'                     => \$man,
+        'version|v+'              => \$version,
+          ) or die( "Error in command\n" );
+if( $help || $man ) {
+    eval {
+        no warnings 'once';
+        $Pod::Usage::Formatter = 'Pod::Text::Termcap';
+        require Pod::Usage;
+    } or
+        die( "Install Pod::Usage or use 'perldoc $0'\n" );
+    Pod::Usage::pod2usage( 1 )                            if( $help );
+    Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if( $man );
+}
+
+if( $version ) {
+    if( $version > 1 ) {
+        printf( "%s\n", substr( $VERSION, 1 ) );
+    } else {
+        printf( "%s version %s\n%s\n", $SELF, $VERSION, $copyright );
+    }
+    exit 0;
+}
+
+sub validstr {
+    return defined $_[0] && length $_[0];
+}
+
+unless( validstr $bash_loc ) {
+    foreach my $dir ( split( /:/, $ENV{PATH} ) ) {
+        if( -x File::Spec->catfile( $dir, 'bash' ) ) {
+            $bash_loc = $dir;
+            last;
+        }
+    }
+}
+$bash_loc          = '/bin'             unless( validstr $bash_loc );
+$source_dir        = 'BIN'              unless( validstr $source_dir );
+$build_dir         = 'BIN'              unless( validstr $build_dir );
+$dest_dir          = '/opt/OpenSIMH'    unless( validstr $dest_dir );
+$windows_installer = 'WindowsInstaller' unless( validstr $windows_installer );
+$wxsfile           = 'Product'          unless( validstr $wxsfile );
+$wxsfile .= '.wxs'                                    unless( $wxsfile =~ /\.\w+$/ );
+@excludes = ( qw/AddDesktopShortcut AddToStartMenu/ ) unless( @excludes );
+
+# Exclude windows-only features
+
+my %exclude = ( map { $_ => 1 } ( split( /, */, join( ',', @excludes ) ) ) );
+
+# Parse the WIX Product file
+
+my $xs = XML::Simple->new;
+
+my $wxs = $xs->XMLin( File::Spec->catfile( $windows_installer, $wxsfile ) );
+
+# Product definition
+my $product = $wxs->{Product};
+
+# Each installable feature consists of a Component Group, even if just one file.
+# Simulators go to INSTALLDIR.  Extract the files from each component of the group.
+
+my %compgroups;
+foreach my $cg ( @{ $product->{ComponentGroup} } ) {
+    my $id = $cg->{Id};
+    if( exists $cg->{Directory} && $cg->{Directory} eq 'INSTALLDIR' ) {
+        my $items = $cg->{Component};
+        $items = [$items] if( ref $items eq 'HASH' );
+        foreach my $item ( @$items ) {
+            my $file = basename( $item->{File}{Source}, '.exe' );
+
+            # Omit ProjectDir files (LICENSE, README, etc)
+            if( $file =~ s/^\$\(var\.SimBinaries\)// ) {
+                $file = lc $file;
+                push @{ $compgroups{$id} }, $file
+                    if( -f File::Spec->catfile( $build_dir, $file ) );
+            }
+        }
+    }
+}
+
+# Installable feature list
+#  Recursively includes subfeatures.
+#  Features with no files in the build are handled by the bash script.
+#  (It's a bit simpler there.)
+
+my $features = $product->{Feature};
+
+my $outfile = @ARGV ? $ARGV[0] : '-';
+my $ofh;
+
+if( $outfile eq '-' ) {
+    $ofh = \*STDOUT;
+} else {
+    open( $ofh, '>', $outfile ) or die( "open $outfile: $!\n" );
+}
+
+printf $ofh (
+              <<'SCRIPT', File::Spec->catfile( $bash_loc, 'bash' ), $VERSION, $source_dir, $dest_dir );
+#!%s
+
+# Copyright (c) 2023 Timothe Litt
+
+# ********************************************************************
+# Machine generated. Contains non-printable characters - DO NOT EDIT *
+# ********************************************************************
+
+# See wxs2sh
+
+VERSION='%s'
+SELF="$(basename "$0")"
+
+SRCDIR="%s"
+DSTDIR="%s"
+
+function displayVersion() {
+    echo "$SELF $VERSION"
+    exit 0
+}
+
+function displayHelp() {
+    cat <<EOF
+$SELF [options]
+
+  options
+    -i      - install simulators
+    -r      - remove simulators
+    -a      - default reply is 'all'
+    -n      - default reply is 'none'
+    -d path - destination root ($DSTDIR)
+    -s path - source directory ($SRCDIR)
+    -L      - list simulator executables
+    -V      - display version
+    -h      - this help
+
+Default is to list available groups with descriptions.
+
+-i and -r are interactive.
+
+EOF
+    exit 0
+}
+
+function die() {
+    echo "Error: $*" >&2
+    exit 99
+}
+
+REMOVE=
+ACTION="list"
+DEFAULT=
+
+while getopts 'ad:iLnrs:hV-:' opt; do
+    case $opt in
+        a)
+            DEFAULT="all"
+            ;;
+        d)
+            DSTDIR="$OPTARG"
+            ;;
+        i)
+            ACTION="install"
+            ;;
+        L)
+            ACTION="LIST"
+            ;;
+        n)
+            DEFAULT="none"
+            ;;
+        r)
+            REMOVE=1
+            ACTION="remove"
+            ;;
+        s)
+            SRCDIR="$OPTARG"
+            ;;
+        h)
+            displayHelp
+            ;;
+        V)
+            displayVersion
+            ;;
+        -)
+            if [ "$OPTARG" == "version" ]; then
+                displayVersion
+            elif [ "$OPTARG" == 'help' ]; then
+                 displayHelp
+            else
+                echo "Unknown option -$OPTARG" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            echo "$SELF -h for usage" >&2
+            exit 1
+            ;;
+    esac
+done
+shift $(( OPTIND - 1 ))
+
+LMAT=$'^([0-9-]+)\x01([^\x01]*)\x01([^\x01]*)\x01(.*)$'
+PAD='                                                                                '
+
+function decode() {
+    local i="$1" pfx="$2"
+
+    [[ "${FEATURES[$i]}" =~ $LMAT ]] || die "Bad data ($i) ${FEATURES[$i]}"
+    eval "${pfx}TAG=\"${BASH_REMATCH[1]}\""
+    eval "${pfx}SEQ=( \$(tr \"-\" \" \" <<<\"\$${pfx}TAG\" ) )"
+    eval "${pfx}TITLE=\"${BASH_REMATCH[2]}\""
+    eval "${pfx}DESC=\"${BASH_REMATCH[3]}\""
+    eval "${pfx}FILES=\"${BASH_REMATCH[4]}\""
+    eval "${pfx}depth=\"\${#${pfx}SEQ[@]}\""
+}
+
+FEATURES=(
+SCRIPT
+
+my @seq;
+
+dofeature( $features, 0, 1 );
+
+print $ofh ( <<'SCRIPT' );
+)
+
+MKDOC=
+MKBIN=
+! [ -d "$DSTDIR/doc" ] && MKDOC="mkdir -p -v $DSTDIR/doc"
+! [ -d "$DSTDIR/bin" ] && MKBIN="mkdir -p -v $DSTDIR/bin"
+
+function dofiles() {
+    local FILES="$*"
+
+    if [ -n "$REMOVE" ]; then
+        for F in $FILES; do
+            if [[ "$F" =~ \.(?:txt|doc|pdf)$ ]]; then
+                rm -v "$DSTDIR/doc/$F"
+            else
+                rm -v "$DSTDIR/bin/$F"
+            fi
+        done
+    else
+        for F in $FILES; do
+            if [[ "$F" =~ \.(?:txt|doc|pdf)$ ]]; then
+                $MKDOC && MKDOC=
+                cp -p -v "$SRCDIR/$F" "$DSTDIR/doc/"
+            else
+                $MKBIN && MKBIN=
+                cp -p -v "$SRCDIR/$F" "$DSTDIR/bin/"
+            fi
+        done
+    fi
+}
+
+# List
+
+if [[ "$ACTION" =~ ^(list|LIST)$ ]]; then
+    for (( i=0; i < ${#FEATURES[@]}; ++i )) ; do
+        decode "$i"
+        if [ -z "$FILES" ]; then
+           # Skip if this feature and all its subfeatures have no files
+           sim_present=
+           for(( j=i+1; j < ${#FEATURES[@]}; ++j )) ; do
+                decode "$j" "sub_"
+                if [[ "${sub_TAG:0:${#TAG}}" != "$TAG" ]] ; then break; fi
+                if [ -n "$sub_FILES" ]; then
+                    sim_present=1
+                    break
+                fi
+           done
+           if [ -z "$sim_present" ]; then
+               continue
+           fi
+        fi
+        printf "%s %s - %s\n" "${PAD:0:$((depth*2))}" "$TITLE" "$DESC"
+        [ "$ACTION" == "LIST" ] && [ -n "$FILES" ] && printf "%s - %s\n" "${PAD:0:$(( (depth+1)*2))}" "$FILES"
+    done
+
+    exit
+fi
+
+# Select by name?
+if [[ $# -gt 0 ]]; then
+    die "No parameters supported"
+
+    while [[ $# -gt 0 ]]; do
+        echo "$1"
+        shift 1
+    done
+
+    exit
+fi
+
+# Interactive
+
+cat <<EOF
+Select simulators to $ACTION
+
+All    - ${ACTION}s all simulators in group
+None   - ${ACTION}s none of the simulators in group
+Choose - ${ACTION}s common components and prompts for sub-groups
+
+<CR> will use the default response, if set with -a or -n
+Ctrl/C will quit (with partial results)
+
+EOF
+
+for (( i=0; i < ${#FEATURES[@]}; )) ; do
+    decode "$i"
+
+    if [ -z "$FILES" ]; then
+       # Skip if this feature and all its subfeatures have no files
+       sim_present=
+       for(( j=i+1; j < ${#FEATURES[@]}; ++j )) ; do
+            decode "$j" "sub_"
+            if [[ "${sub_TAG:0:${#TAG}}" != "$TAG" ]] ; then break; fi
+            if [ -n "$sub_FILES" ]; then
+                sim_present=1
+                break
+            fi
+       done
+       if [ -z "$sim_present" ]; then
+           (( ++i ))
+           continue
+       fi
+    fi
+
+    # Find depth of next feature
+
+    if [[ $((i+1)) -lt ${#FEATURES[@]} ]]; then
+        decode "$(( i+1 ))" "next_"
+    else
+        next_depth=-1
+    fi
+
+    printf "%s %s - %s: " "${PAD:0:$((depth*2))}" "$TITLE" "$DESC"
+
+    # No subfeature choice if next feature depth > this
+    xpn=
+    if [ -n "$next_TAG" ] && (( next_depth > depth  )); then
+        xpn=y
+    fi
+    # Prompt for disposition
+    shopt -s nocasematch
+    while true; do
+        if [ -n "$xpn" ]; then
+            read -e -r -p "$ACTION [All, Choose, None]: " REPLY
+            [ -z "$REPLY" ] && REPLY="$DEFAULT"
+            if [[ "$REPLY" =~ ^((a(l(l)?)?)|(C(h(o(o(s(e)?)?)?)?)?)|(N(o(n(e)?)?)?))$ ]] ; then
+               break
+            fi
+        else
+            read -e -r -p "$ACTION [All, None]: " REPLY
+            [ -z "$REPLY" ] && REPLY="$DEFAULT"
+            if [[ "$REPLY" =~ ^((a(l(l)?)?)|(N(o(n(e)?)?)?))$ ]] ; then
+               break
+            fi
+        fi
+        echo "Choose one of the options offered"
+    done
+    shopt -u nocasematch
+    if ! [[ "$REPLY" =~ ^[Cc] ]]; then
+        # All or None of the files & subfeatures
+        [[ "$REPLY" =~ ^[Aa] ]] && dofiles "$FILES"
+        (( ++i ))
+        while [[ i -lt ${#FEATURES[@]} ]] ; do
+            decode "$i" "next_"
+            if [[ "${next_TAG:0:${#TAG}}" != "$TAG" ]]; then
+                break
+            fi
+            [[ "$REPLY" =~ ^[Aa] ]] && dofiles "$next_FILES"
+            (( ++i ))
+        done
+        continue
+    fi
+    # Choose subfeatures (Handle any files attached to the feature)
+    dofiles "$FILES"
+    (( ++i ))
+done
+
+exit
+SCRIPT
+
+if( $ofh != \*STDOUT ) {
+    close( $ofh ) or die( "close $outfile: $!\n" );
+    chmod( S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH, $outfile ) or
+        die( "chmod $outfile: $!\n" );
+}
+
+exit;
+
+sub dofeature {
+    my( $feature, $depth ) = @_;
+
+    $#seq = $depth;
+    $seq[$depth]++;
+
+    return if( $exclude{ $feature->{Id} } );
+
+    my $tag = join( '-', @seq );
+
+    printf $ofh (
+            "'%s\001%s\001%s\001", $tag, $feature->{Title},
+            $feature->{Description} );
+
+    if( exists $feature->{ComponentGroupRef} ) {
+        my $cgr = $feature->{ComponentGroupRef};
+        $cgr = [$cgr] if( ref $cgr eq 'HASH' );
+        foreach my $cgr ( @$cgr ) {
+            my $id    = $cgr->{Id};
+            my $first = "";
+            foreach my $file ( @{ $compgroups{$id} } ) {
+                printf $ofh ( "%s%s", $first, $file );
+                $first = ' ';
+            }
+        }
+    }
+    print $ofh ( "'\n" );
+    if( exists $feature->{Feature} ) {
+        foreach my $feature ( @{ $feature->{Feature} } ) {
+            dofeature( $feature, $depth + 1 );
+        }
+    }
+}
+
+# Local Variables:
+# mode: cperl
+# End:
+
+__END__
+
+=pod
+
+=head1 NAME
+
+wxs2sh - Convert WIX Installer XML to bash installer script
+
+=head1 SYNOPSIS
+
+ wxs2sh [options] [output]
+    --bash-location  --build-directory   --destination-directory  --exclude
+    --product        --source-directory  --windows-installer
+    --help           --man               --version
+
+=head1 DESCRIPTION
+
+B<wxs2sh> compiles the Windows WIX Installer product definition file into a
+roughly equivalent BASH installer script.
+
+The Windows installer handles feature groups, and with the large number of
+simulators that seems useful for Unix targets as well.
+
+The feature list and groups is subject to change on Windows, so compling from
+the WIX definitions keeps them synchronized.
+
+The output script is written to the specified file and made executable.  If
+omitted, written to F<stdout>.  F<-> explictly specified F<stdout>.
+
+=head1 OPTIONS
+
+The following options control B<wxs2sh>.
+
+=over 4
+
+=item B<--bash-location>=F<path>
+
+Specifies the directory that contains F<bash> on the target system.
+
+Default is its location on the current F<PATH> (Usually a build system of the same type.)
+
+=item B<--destination-directory>=F<path>
+
+Installation root for the simulators, which will be installed in F<bin/>.
+
+Default is F</opt/OpenSIMH>.
+
+=item B<--build-directory>=F<path>
+
+Specifies the simulator build directory.  Used to determine which simulators will
+be in the kit.
+
+Default is F<BIN>.
+
+=item B<--exclude>=I<Id,...>
+
+(Windows-only) Feature Ids to be excluded.  Specify multiple times, or comma-separated
+
+Default is I<AddDesktopShortcut>, I<AddToStartMenu>
+
+=item B<--product>=I<name>
+
+Filename of WIX product file.  Default is I<Product.wxs>.
+
+=item B<--source-directory>=F<path>
+
+Specifies the installer source directory on the target system.
+
+Default is F<BIN>
+
+=item B<--windows-installer>=F<path>
+
+Directory containing the WIX files.
+
+Default is F<WindowsInstaller>
+
+=item B<--version>
+
+Displays the version number of I<prune_kits>.
+
+=item B<--help>
+
+Displays the help sections of the manual.
+
+=item B<--man>
+
+Displays the manual.
+
+=back
+
+=head1 BUGS
+
+Report any bugs, feature requests and/or patches on the issue tracker,
+located at F<https://github.com/B<TBD>/issues>.  In the
+event that the project moves, contact the author directly.
+
+=head1 AUTHOR
+
+Timothe Litt  E<lt>litt@acm.orgE<gt>
+
+=head1 COPYRIGHT and LICENSE
+
+Copyright (c) 2023 Timothe Litt
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of the author shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from the author.
+
+Any modifications to this software must be clearly documented by and
+attributed to their author, who is responsible for their effects.
+
+Bug reports, suggestions and patches are welcomed by the original author.
+
+=head1 SEE ALSO
+
+I<WIX>
+
+=cut
+
+
